@@ -200,7 +200,8 @@ mode = "rw"
 ```
 
 The **default mounts** (all read-only, skipped where missing) are `/usr` and
-`/etc` (Linux), `/opt`, `~/.gitconfig`, `~/.config/git`, `~/.local/bin`,
+`/etc` (Linux), `/opt`, `~/.gitconfig` and `~/.config/git/{config,ignore,attributes}`
+(not the credential store), `~/.local/bin`,
 `~/.local/lib`, and conda at its usual places. The agent's own program is
 mounted automatically. Shell startup files (`~/.bashrc` etc.) are deliberately
 not mounted: the sandbox inherits the launching shell's environment instead.
@@ -331,7 +332,9 @@ Known gaps, accepted:
 - **macOS**: every loopback port is reachable from the sandbox, including other
   local services; there is no private loopback.
 - **Creating new protected files** isn't prevented on Linux (see above).
-- **Symlinked protected files**: the target is pinned, not the link itself.
+- **Symlinked protected files**: the target is pinned, not the link itself, so
+  an agent can replace the link with a file of its own. Don't symlink protected
+  files, or protect the directory holding the link.
 - **`linux.extra_args`** passes raw podman arguments and can weaken the
   sandbox; it's your own config.
 - On Linux the sandbox's uid 0 is your own uid (single-id user namespace), and

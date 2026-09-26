@@ -48,14 +48,26 @@ path = "/opt"
 mode = "ro"
 create = false
 
-# Git identity, so commits work. Credentials (~/.git-credentials) stay hidden.
+# Git identity, so commits work. Credentials stay hidden: ~/.git-credentials,
+# and ~/.config/git/credentials (the credential store's other location),
+# which is why only git's config files are mounted from ~/.config/git.
 [[mount]]
 path = "~/.gitconfig"
 mode = "ro"
 create = false
 
 [[mount]]
-path = "~/.config/git"
+path = "~/.config/git/config"
+mode = "ro"
+create = false
+
+[[mount]]
+path = "~/.config/git/ignore"
+mode = "ro"
+create = false
+
+[[mount]]
+path = "~/.config/git/attributes"
 mode = "ro"
 create = false
 

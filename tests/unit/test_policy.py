@@ -347,3 +347,13 @@ def test_colon_in_path_refused(make_ctx, home):
     (home / "a:b").mkdir()
     with pytest.raises(PolicyError, match="':'"):
         policy(make_ctx(cwd=root))
+
+
+def test_git_credentials_never_visible(make_ctx, home):
+    for rel in (".gitconfig", ".config/git/config", ".config/git/credentials", ".git-credentials"):
+        write(home / rel, "x")
+    root = project(home)
+    t = policy(make_ctx(cwd=root)).table()
+    assert t.visible(str(home / ".gitconfig")) and t.visible(str(home / ".config/git/config"))
+    assert not t.visible(str(home / ".config/git/credentials"))
+    assert not t.visible(str(home / ".git-credentials"))
