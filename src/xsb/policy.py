@@ -151,6 +151,10 @@ class Policy:
     resolv_extra: list = field(default_factory=list)  # host resolv.conf search/options lines
     tmpdir: str | None = None                         # macOS: per-launch TMPDIR
     proxy_port: int | None = None                     # the port HTTP(S)_PROXY points at
+    xsb_home: str = ""                                # ~/.xsb (denied outright by Seatbelt)
+    protect_globs: list = field(default_factory=list) # [protect] patterns, absolute (Seatbelt
+                                                      # turns them into regexes, which also
+                                                      # cover files that don't exist yet)
 
     @property
     def create_dirs(self) -> list[str]:
@@ -323,7 +327,9 @@ def build_policy(cfg: Config, req: LaunchRequest, backend: str,
                     agent=req.verb if req.verb in agents.AGENTS else None,
                     agent_dirs=agent_dirs, programs=programs, protected=protected,
                     skipped=skipped, tmpdir=tmpdir,
-                    proxy_port=env_port(env))
+                    proxy_port=env_port(env), xsb_home=ctx.xsb_home,
+                    protect_globs=[exp.path(k, f"protect {toml_value(k)}")
+                                   for k, (on, _) in cfg.merged.table("protect").items() if on])
     if ctx.os == "linux" and not check_only:
         for p in ("/usr", "/etc"):
             if not os.path.isdir(p):

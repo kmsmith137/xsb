@@ -1,0 +1,67 @@
+;; UNVERIFIED: a first guess at what a default-deny (deny default) Seatbelt
+;; profile needs on macOS for claude, codex, git, python and bash to run. It has
+;; not been tried on a Mac yet. Grow it there (see MACOS.md), watching denials
+;; with:  log stream --style compact --predicate 'sender == "Sandbox"'
+;; and record every addition, and why, in MACOS.md.
+;;
+;; xsb emits `(version 1)` and `(deny default)` before this file, and the
+;; generated rules (mounts, protected paths, ~/.xsb, network) after it.
+
+;; Processes, signals, terminals.
+(allow process-fork)
+(allow process-exec)
+(allow process-info* (target same-sandbox))
+(allow signal (target same-sandbox))
+(allow sysctl-read)
+(allow pseudo-tty)
+(allow user-preference-read)
+(allow ipc-posix-sem)
+
+;; System paths (read-only). /opt/homebrew comes from the default /opt mount.
+(allow file-read*
+    (subpath "/System")
+    (subpath "/usr")
+    (subpath "/bin")
+    (subpath "/sbin")
+    (subpath "/Library")
+    (subpath "/private/etc")
+    (subpath "/private/var/db/timezone")
+    (literal "/dev/null")
+    (literal "/dev/zero")
+    (literal "/dev/random")
+    (literal "/dev/urandom")
+    (literal "/dev/ptmx")
+    (subpath "/dev/fd")
+    (regex #"^/dev/tty"))
+
+;; The root directory and the top-level symlinks into /private.
+(allow file-read-metadata
+    (literal "/")
+    (literal "/etc")
+    (literal "/tmp")
+    (literal "/var")
+    (literal "/private")
+    (literal "/private/var"))
+
+;; Writable devices.
+(allow file-write-data
+    (literal "/dev/null")
+    (literal "/dev/zero"))
+(allow file-read* file-write* file-ioctl
+    (literal "/dev/ptmx")
+    (regex #"^/dev/ttys[0-9]+$")
+    (literal "/dev/tty"))
+
+;; DNS and /etc/hosts go through mDNSResponder; allowed on purpose (see the
+;; README: DNS works in every mode, unfiltered). TLS certificate checks (Go
+;; binaries such as gh use trustd) and the Keychain (Claude keeps its login
+;; there) need their services too.
+(allow mach-lookup
+    (global-name "com.apple.dnssd.service")
+    (global-name "com.apple.trustd")
+    (global-name "com.apple.trustd.agent")
+    (global-name "com.apple.SecurityServer")
+    (global-name "com.apple.securityd")
+    (global-name "com.apple.system.opendirectoryd.libinfo")
+    (global-name "com.apple.system.notification_center")
+    (global-name "com.apple.logd"))
