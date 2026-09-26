@@ -1,0 +1,186 @@
+# Built-in xsb defaults. This is valid TOML: copy any block into
+# ~/.xsb/config.toml or a project's xsb.toml and edit it.
+#
+# Merge rules: single values and lists of strings replace; [[...]] entries
+# append (same path/glob/dir: the later one wins); tables merge key by key.
+
+# Where each agent keeps its login, settings and transcripts. Relative paths
+# resolve against the project root. A shared dir means every project's agent
+# can read the others' transcripts and memory, and edit the shared settings
+# and hooks (which run inside sandboxes only).
+claude_dir = "~/.xsb/claude"
+codex_dir  = "~/.xsb/codex"
+
+# Refuse to launch when the current directory is (under) one of these dirs,
+# relative to the root. None by default. Example:
+#   refuse = [ { dir = "top", reason = "run from a feature worktree" } ]
+refuse = []
+
+# Read-only inside the sandbox even when inside the writable root: the files
+# Claude Code loads on its own, where an agent's edit (e.g. a new hook) would
+# run on the host the next time you start plain `claude` there. Globs
+# relative to the root; `*` is one path level, so these cover the root and
+# each immediate subdirectory. Set an entry to false to remove it. Always
+# protected, whatever this table says: every git repo's config and hooks/,
+# and xsb.toml.
+[protect]
+".claude/settings.json" = true
+".claude/settings.local.json" = true
+".claude/hooks" = true
+".mcp.json" = true
+"*/.claude/settings.json" = true
+"*/.claude/settings.local.json" = true
+"*/.claude/hooks" = true
+"*/.mcp.json" = true
+
+# Host paths visible in the sandbox, at the same path. Everything not
+# listed is invisible. The root and the agent's dir are always added
+# read-write. A missing path is skipped; create = true creates it first (if
+# its parent exists); enabled = false removes an entry with the same path
+# (including these defaults). The agent's own program is mounted
+# automatically and isn't listed here. `xsb init` adds entries for things
+# these defaults miss on your machine, and `xsb status` flags later gaps.
+
+# System software outside /usr (CUDA alternatives, vendor tools; Homebrew
+# on Apple-silicon Macs).
+[[mount]]
+path = "/opt"
+mode = "ro"
+create = false
+
+# Git identity, so commits work. Credentials (~/.git-credentials) stay hidden.
+[[mount]]
+path = "~/.gitconfig"
+mode = "ro"
+create = false
+
+[[mount]]
+path = "~/.config/git"
+mode = "ro"
+create = false
+
+# Per-user tools (e.g. direnv) and `pip install --user` packages. Not all of
+# ~/.local: ~/.local/share holds desktop-app data (Trash, keyrings, chat
+# history).
+[[mount]]
+path = "~/.local/bin"
+mode = "ro"
+create = false
+
+[[mount]]
+path = "~/.local/lib"
+mode = "ro"
+create = false
+
+# Conda, at its common install locations; whichever exist are mounted
+# (/opt/conda is already covered by /opt).
+#
+# Shell startup files (~/.bashrc, ~/.zshrc, ...) are deliberately not mounted:
+# the sandbox inherits the launching shell's environment (PATH, the active
+# conda env, a direnv-loaded venv) instead. Loading them again inside would
+# redo that setup in the wrong order and re-export any secrets kept there.
+[[mount]]
+path = "~/miniforge3"
+mode = "ro"
+create = false
+
+[[mount]]
+path = "~/miniconda3"
+mode = "ro"
+create = false
+
+[[mount]]
+path = "~/anaconda3"
+mode = "ro"
+create = false
+
+[[mount]]
+path = "~/.conda"
+mode = "ro"
+create = false
+
+[[mount]]
+path = "~/.condarc"
+mode = "ro"
+create = false
+
+# Device nodes (Linux only; ignored on macOS). All NVIDIA GPUs, skipped where
+# absent. This exposes the GPU driver, a large kernel interface, to the
+# sandbox; remove with:  [[device]] glob = "/dev/nvidia*"  enabled = false
+[[device]]
+glob = "/dev/nvidia*"
+
+[env]
+require = []         # names that must be set in the launching shell (also forwarded)
+
+# Variables copied from the launching shell, by name, only if set. All
+# others are dropped, since the host environment may contain secrets. Set
+# an entry to false to stop forwarding it.
+[env.forward]
+# terminal and locale
+TERM = true
+COLORTERM = true
+LANG = true
+LC_ALL = true
+LC_CTYPE = true
+TZ = true
+# the user's shell (Claude runs its Bash tool with $SHELL; zsh on macOS)
+SHELL = true
+# editor and pager (Claude's external editor, git commit messages); the
+# program itself must be visible in the sandbox (e.g. under a conda mount)
+EDITOR = true
+VISUAL = true
+GIT_EDITOR = true
+PAGER = true
+GIT_PAGER = true
+# ssh and tmux markers: Claude checks these to choose OSC 52 escape
+# sequences for copy-to-clipboard over ssh/tmux (without them it assumes a
+# local session and tries X11/Wayland helpers, which can't work in the
+# sandbox). Only the strings are forwarded. The tmux socket is never
+# mounted: the tmux server runs outside the sandbox, so its socket would be
+# an escape route (send-keys).
+SSH_TTY = true
+SSH_CONNECTION = true
+SSH_CLIENT = true
+TMUX = true
+TMUX_PANE = true
+# toolchain: the active conda env, and the library search path as the
+# launching shell has it (CUDA is normally found via /etc/ld.so.conf.d)
+CONDA_PREFIX = true
+LD_LIBRARY_PATH = true
+
+# Extra variables set inside the sandbox, e.g.  VIRTUAL_ENV = "$CWD/.venv"
+# Variables xsb sets itself (HOME, USER, PATH, the proxy variables, the
+# agent's config-dir variable, XSB_*) cannot be set here.
+[env.set]
+CUPY_CACHE_DIR = "/tmp/cupy_cache"   # home is read-only, so caches go to /tmp
+
+[network]
+# "enforced": the proxy is the only way out of the sandbox.
+# "open":     no proxy at all.
+# The domain lists are ~/.xsb/net-allow.txt and ~/.xsb/net-deny.txt, shared by
+# all projects; each agent's own required domains are always allowed.
+mode = "enforced"
+
+[linux]
+# Base image. It must match the host's distro, since the host's /usr is
+# mounted over it. "auto" means docker.io/library/<ID>:<VERSION_ID> from the
+# host's /etc/os-release (e.g. ubuntu:24.04).
+image = "auto"
+extra_args = []      # extra `podman run` arguments
+
+# Linux only: the host's /usr and /etc make the host's own programs run inside
+# the container (the base image supplies only the skeleton). The backend
+# refuses to launch if either doesn't exist on the host.
+[[match]]
+os = "linux"
+
+[[match.mount]]
+path = "/usr"
+mode = "ro"
+create = false
+
+[[match.mount]]
+path = "/etc"
+mode = "ro"
+create = false

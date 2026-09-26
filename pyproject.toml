@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xsb"
+dynamic = ["version"]
+description = "Sandbox launcher for coding agents (Claude Code, Codex): allowlisted filesystem, protected paths, enforced egress proxy"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+xsb = "xsb.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "xsb.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+xsb = ["data/*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
