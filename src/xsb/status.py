@@ -87,6 +87,9 @@ def gather(ctx: Context, backend=None) -> tuple[list[str], Checks]:
         checks.add(False, f"{ctx.tilde(ctx.xsb_home)} does not exist", "fix: run `xsb init`")
     for problem in proxy.list_problems(ctx):
         checks.add(False, problem)
+    vp = proxy.version_problem(ctx)
+    if vp:
+        checks.add(False, vp)
     if cfg is not None:
         _config_checks(ctx, cfg, backend, checks)
     return lines, checks

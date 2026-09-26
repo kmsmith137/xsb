@@ -11,6 +11,7 @@ from .config import (ConfigError, find_configs, format_effective, defaults_text,
                      is_under, load_config)
 from .context import Context
 from .policy import PolicyError
+from .proxy import ProxyError
 
 USAGE = """\
 usage: xsb VERB [options] [args...]
@@ -198,6 +199,44 @@ def cmd_status(ctx: Context, args) -> int:
 
 
 # --------------------------------------------------------------------------
+# net-* verbs (plan §7.1)
+# --------------------------------------------------------------------------
+
+def cmd_net_allow(ctx: Context, args) -> int:
+    from . import proxy
+    for m in proxy.add_to_list(ctx, "allow", args.domains, ALLOW_HEADER):
+        out(m)
+    return 0
+
+
+def cmd_net_deny(ctx: Context, args) -> int:
+    from . import proxy
+    for m in proxy.add_to_list(ctx, "deny", args.domains, DENY_HEADER):
+        out(m)
+    return 0
+
+
+def cmd_net_log(ctx: Context, args) -> int:
+    from . import proxy
+    lines = proxy.log_lines(ctx)
+    if lines is None:
+        out("no proxy log yet")
+    elif not lines:
+        out("nothing blocked or denied yet")
+    for line in lines or []:
+        out(line)
+    return 0
+
+
+def cmd_net_stop(ctx: Context, args) -> int:
+    from . import proxy
+    pid = proxy.stop(ctx)
+    out(f"stopped the proxy (pid {pid}); the next launch starts it again" if pid
+        else "the proxy is not running")
+    return 0
+
+
+# --------------------------------------------------------------------------
 # dispatch
 # --------------------------------------------------------------------------
 
@@ -214,6 +253,16 @@ def build_parsers() -> dict:
     ap = argparse.ArgumentParser(prog="xsb status", description="Project, proxy and health "
                                  "checks; exits non-zero if any check fails.")
     p["status"] = (ap, cmd_status)
+    for verb, fn, which in (("net-allow", cmd_net_allow, "allow"), ("net-deny", cmd_net_deny, "deny")):
+        ap = argparse.ArgumentParser(prog=f"xsb {verb}", description=f"Append domains to "
+                                     f"~/.xsb/net-{which}.txt (through a symlink, if it is one).")
+        ap.add_argument("domains", nargs="+", metavar="DOMAIN")
+        p[verb] = (ap, fn)
+    p["net-log"] = (argparse.ArgumentParser(prog="xsb net-log",
+                                            description="Show blocked and denied requests."),
+                    cmd_net_log)
+    p["net-stop"] = (argparse.ArgumentParser(prog="xsb net-stop", description="Stop the proxy "
+                                             "(the next launch restarts it)."), cmd_net_stop)
     return p
 
 
@@ -235,6 +284,6 @@ def main(argv: list[str] | None = None, ctx: Context | None = None) -> int:
     try:
         ctx = ctx or Context.from_process()
         return handler(ctx, args)
-    except (UserError, ConfigError, PolicyError) as e:
+    except (UserError, ConfigError, PolicyError, ProxyError) as e:
         err(str(e))
         return 1
