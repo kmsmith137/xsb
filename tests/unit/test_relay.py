@@ -105,9 +105,12 @@ def test_big_reply_truncated_for_udp_client_then_tcp(chain):
     assert len(full) > 1000
 
 
-def test_max_udp_size_reads_edns():
-    sys.path.insert(0, os.path.dirname(RELAY))
-    import relay
+def test_max_udp_size_reads_edns(monkeypatch):
+    import importlib.util
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)   # no __pycache__ in the package
+    spec = importlib.util.spec_from_file_location("xsb_relay", RELAY)
+    relay = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(relay)
     q = make_query()
     assert relay.max_udp_size(q) == 512
     opt = b"\x00" + struct.pack("!HHIH", 41, 1232, 0, 0)

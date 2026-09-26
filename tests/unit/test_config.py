@@ -360,3 +360,11 @@ def test_config_outside_project(run, make_ctx):
     rc, out, _ = run(make_ctx(), "config")
     assert rc == 0 and "Not in a project" in out
     tomllib.loads(out)
+
+
+def test_broken_symlink_mount_skipped(make_ctx, home):
+    os.symlink(home / "gone", home / "dangling")
+    root = proj(home, '[[mount]]\npath = "~/dangling"\n[[mount]]\npath = "~/dang*"\n')
+    mounts, skipped = config_mounts(load_config(make_ctx(cwd=root)))
+    assert not any("dangling" in m.path for m in mounts)
+    assert f"{home}/dangling" in skipped

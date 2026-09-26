@@ -11,6 +11,10 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 
+class BackendError(Exception):
+    """The backend can't launch (e.g. a missing program); reported in one line."""
+
+
 @dataclass
 class LaunchSpec:
     argv: list[str]

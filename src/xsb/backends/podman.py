@@ -14,7 +14,7 @@ import subprocess
 import sys
 from importlib import resources
 
-from . import LaunchSpec
+from . import BackendError, LaunchSpec
 
 RELAY_IN_SANDBOX = "/run/xsb/relay.py"
 SOCK_IN_SANDBOX = "/run/xsb/sock"
@@ -86,6 +86,8 @@ class PodmanBackend:
         return LaunchSpec(argv=argv, files=files, image=policy.image)
 
     def launch(self, spec: LaunchSpec) -> int:
+        if not shutil.which("podman"):
+            raise BackendError("podman not found; install it (see `xsb status`)")
         for path, text in spec.files.items():
             tmp = path + f".{os.getpid()}.tmp"
             with open(tmp, "w") as f:
@@ -109,7 +111,9 @@ def ensure_image(image: str):
     r = subprocess.run(["podman", "image", "exists", image], capture_output=True)
     if r.returncode != 0:
         print(f"xsb: pulling the base image {image} (first use)", file=sys.stderr)
-        subprocess.run(["podman", "pull", image], check=True)
+        if subprocess.run(["podman", "pull", image]).returncode != 0:
+            raise BackendError(f"could not pull the base image {image}; set linux.image "
+                               "to an image matching this host's distro")
 
 
 def run_foreground(argv: list[str]) -> int:

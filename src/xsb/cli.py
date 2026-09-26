@@ -11,6 +11,7 @@ from .config import (ConfigError, find_configs, format_effective, defaults_text,
                      is_under, load_config)
 from .context import Context
 from .policy import PolicyError
+from .backends import BackendError
 from .proxy import ProxyError
 
 USAGE = """\
@@ -258,15 +259,18 @@ def cmd_launch(ctx: Context, verb: str, rest: list[str]) -> int:
         raise UserError(f"{ctx.tilde(ctx.xsb_home)} does not exist; run `xsb init`")
     cfg = load_config(ctx)
     backend = get_backend(ctx.os)
-    mode = network or cfg.network_mode
+    enforced = (network or cfg.network_mode) == "enforced"
     port = None
-    if mode == "enforced" and not dry:
-        proxy.ensure_running(ctx)
-    if mode == "enforced" and ctx.os == "macos":
+    if enforced and ctx.os == "macos":
+        # The sandbox reaches the proxy's TCP port directly, so it must be known first.
+        if not dry:
+            proxy.ensure_running(ctx)
         port = proxy.running_port(ctx)
     req = LaunchRequest(verb=verb, args=args, network=network, tty=sys.stdin.isatty(),
                         proxy_port=port)
     policy = build_policy(cfg, req, backend.name)
+    if enforced and not dry and ctx.os != "macos":
+        proxy.ensure_running(ctx)
     if policy.agent:
         from . import prompt
         prompt.add_to_command(policy, prompt.generate(policy))
@@ -390,7 +394,7 @@ def main(argv: list[str] | None = None, ctx: Context | None = None) -> int:
         try:
             ctx = ctx or Context.from_process()
             return cmd_launch(ctx, verb, rest)
-        except (UserError, ConfigError, PolicyError, ProxyError) as e:
+        except (UserError, ConfigError, PolicyError, ProxyError, BackendError) as e:
             err(str(e))
             return 1
     parsers = build_parsers()
@@ -402,6 +406,6 @@ def main(argv: list[str] | None = None, ctx: Context | None = None) -> int:
     try:
         ctx = ctx or Context.from_process()
         return handler(ctx, args)
-    except (UserError, ConfigError, PolicyError, ProxyError) as e:
+    except (UserError, ConfigError, PolicyError, ProxyError, BackendError) as e:
         err(str(e))
         return 1

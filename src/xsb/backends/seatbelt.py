@@ -20,7 +20,7 @@ import re
 import shutil
 from importlib import resources
 
-from . import LaunchSpec
+from . import BackendError, LaunchSpec
 from .podman import run_foreground
 
 
@@ -194,6 +194,8 @@ class SeatbeltBackend:
                           description=f"# Seatbelt profile ({path})\n{text}")
 
     def launch(self, spec: LaunchSpec) -> int:
+        if self.check():
+            raise BackendError(self.check()[0])
         for path, text in spec.files.items():
             os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
             with open(path, "w") as f:

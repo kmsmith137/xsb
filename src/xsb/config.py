@@ -263,11 +263,12 @@ class Expander:
         return os.path.normpath(p)
 
     def glob(self, s: str, what: str) -> list[str]:
-        """Existing paths matching s (after expansion). Missing ones are skipped."""
+        """Existing paths matching s (after expansion). Missing ones, including
+        broken symlinks, are skipped."""
         p = self.path(s, what)
         if glob.has_magic(p):
-            return sorted(glob.glob(p))
-        return [p] if os.path.lexists(p) else []
+            return sorted(m for m in glob.glob(p) if os.path.exists(m))
+        return [p] if os.path.exists(p) else []
 
 
 # --------------------------------------------------------------------------

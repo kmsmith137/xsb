@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from . import agents
 from .agents import Program, resolve_program
-from .config import Config, ConfigError, is_under
+from .config import Config, is_under
 from .tomlw import toml_value
 
 LINUX_PROXY_PORT = 3128                  # the in-sandbox relay's port (Linux, enforced)
@@ -172,10 +172,13 @@ class Policy:
         if self.image:
             lines.append(f"image:    {self.image}")
         for name, d in self.agent_dirs.items():
+            line = f"agent:    {name}: config dir {tilde(d)}"
             prog = self.programs.get(name)
-            p = f", program {prog.real}" + (f" (mounts {prog.mount})" if prog and prog.mount != prog.real else "") \
-                if prog else ""
-            lines.append(f"agent:    {name}: config dir {tilde(d)}{p}")
+            if prog:
+                line += f", program {prog.real}"
+                if prog.mount != prog.real:
+                    line += f" (mounts {prog.mount})"
+            lines.append(line)
         lines.append("mounts, in order (deeper paths win; later ones win for the same path):")
         for m in self.mounts:
             src = f" (from {m.src})" if m.src else ""
