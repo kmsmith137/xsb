@@ -199,6 +199,95 @@ def cmd_status(ctx: Context, args) -> int:
 
 
 # --------------------------------------------------------------------------
+# Launch verbs: claude, codex, shell, run (plan §4)
+# --------------------------------------------------------------------------
+
+LAUNCH_VERBS = ("claude", "codex", "shell", "run")
+
+LAUNCH_HELP = """\
+usage: xsb {verb} [--dry-run] [--network {{enforced,open}}] {rest}
+
+  --dry-run              print the resolved policy and the exact backend command;
+                         launch nothing
+  --network MODE         override the configured network mode for this launch
+"""
+
+
+def parse_launch(verb: str, rest: list[str]):
+    """xsb's options come first; everything from the first other argument (or
+    after `--`) belongs to the agent or command."""
+    dry, network, i = False, None, 0
+    while i < len(rest):
+        a = rest[i]
+        if a == "--dry-run":
+            dry = True
+        elif a == "--network" or a.startswith("--network="):
+            if "=" in a:
+                network = a.split("=", 1)[1]
+            else:
+                i += 1
+                if i == len(rest):
+                    raise UserError("--network needs a value: enforced or open")
+                network = rest[i]
+            if network not in ("enforced", "open"):
+                raise UserError(f"--network must be enforced or open, not {network!r}")
+        elif a in ("-h", "--help") and verb in ("shell", "run"):
+            return None
+        elif a == "--":
+            i += 1
+            break
+        else:
+            break
+        i += 1
+    return dry, network, rest[i:]
+
+
+def cmd_launch(ctx: Context, verb: str, rest: list[str]) -> int:
+    from . import proxy
+    from .backends import get_backend
+    from .policy import LaunchRequest, build_policy
+    parsed = parse_launch(verb, rest)
+    if parsed is None:
+        tail = {"shell": "", "run": "-- CMD [args...]"}[verb]
+        sys.stdout.write(LAUNCH_HELP.format(verb=verb, rest=tail))
+        return 0
+    dry, network, args = parsed
+    if verb == "shell" and args:
+        raise UserError("xsb shell takes no arguments; use `xsb run -- CMD [args...]`")
+    if not os.path.isdir(ctx.xsb_home):
+        raise UserError(f"{ctx.tilde(ctx.xsb_home)} does not exist; run `xsb init`")
+    cfg = load_config(ctx)
+    backend = get_backend(ctx.os)
+    mode = network or cfg.network_mode
+    port = None
+    if mode == "enforced" and not dry:
+        proxy.ensure_running(ctx)
+    if mode == "enforced" and ctx.os == "macos":
+        port = proxy.running_port(ctx)
+    req = LaunchRequest(verb=verb, args=args, network=network, tty=sys.stdin.isatty(),
+                        proxy_port=port)
+    policy = build_policy(cfg, req, backend.name)
+    spec = backend.command(policy)
+    if dry:
+        out("# Resolved policy")
+        out(policy.describe(ctx.tilde))
+        out("")
+        if spec.description:
+            out(spec.description)
+            out("")
+        out(f"# Backend command ({backend.name})")
+        from .backends.podman import format_argv
+        out(format_argv(spec.argv, spec.image))
+        return 0
+    agent_dirs = {os.path.realpath(d) for d in policy.agent_dirs.values()}
+    for d in policy.create_dirs:
+        os.makedirs(d, exist_ok=True)
+        if os.path.realpath(d) in agent_dirs:
+            os.chmod(d, 0o700)
+    return backend.launch(spec)
+
+
+# --------------------------------------------------------------------------
 # net-* verbs (plan §7.1)
 # --------------------------------------------------------------------------
 
@@ -275,6 +364,13 @@ def main(argv: list[str] | None = None, ctx: Context | None = None) -> int:
         out(f"xsb {__version__}")
         return 0
     verb, rest = argv[0], argv[1:]
+    if verb in LAUNCH_VERBS:
+        try:
+            ctx = ctx or Context.from_process()
+            return cmd_launch(ctx, verb, rest)
+        except (UserError, ConfigError, PolicyError, ProxyError) as e:
+            err(str(e))
+            return 1
     parsers = build_parsers()
     if verb not in parsers:
         err(f"unknown verb '{verb}' (see `xsb --help`)")

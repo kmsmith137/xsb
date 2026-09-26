@@ -1,0 +1,35 @@
+podman run \
+    --rm \
+    --init \
+    --network none \
+    --tmpfs /tmp \
+    --tmpfs /run \
+    -w /home/u/proj/wt \
+    --group-add keep-groups \
+    -it \
+    --ipc host \
+    -e TERM=xterm-256color \
+    -e HOME=/home/u \
+    -e USER=u \
+    -e PATH=/usr/bin:/bin \
+    -e CLAUDE_CONFIG_DIR=/home/u/.xsb/claude \
+    -e IS_SANDBOX=1 \
+    -e HTTPS_PROXY=http://127.0.0.1:3128 \
+    -e XSB_ROOT=/home/u/proj \
+    -e 'SSH_CONNECTION=10.0.0.1 5000 10.0.0.2 22' \
+    -v /usr:/usr:ro \
+    -v /etc:/etc:ro \
+    -v /home/u/proj:/home/u/proj:rw \
+    -v /home/u/.xsb/claude:/home/u/.xsb/claude:rw \
+    -v /home/u/proj/top:/home/u/proj/top:ro \
+    -v /home/u/proj/top/.git:/home/u/proj/top/.git:rw \
+    -v /home/u/proj/top/.git/config:/home/u/proj/top/.git/config:ro \
+    -v /home/u/proj/top/.git/hooks:/home/u/proj/top/.git/hooks:ro \
+    -v /opt/claude/claude-2.1:/opt/claude/claude-2.1:ro \
+    -v <relay.py>:/run/xsb/relay.py:ro \
+    -v /run/user/1000/xsb/sock:/run/xsb/sock:ro \
+    -v /run/user/1000/xsb/resolv.conf:/etc/resolv.conf:ro \
+    --device /dev/nvidia0 \
+    --device /dev/nvidiactl \
+    docker.io/library/ubuntu:24.04 \
+    /bin/sh -c '/usr/bin/python3 -I /run/xsb/relay.py && exec "$@"' xsb /opt/claude/claude-2.1 --dangerously-skip-permissions --resume

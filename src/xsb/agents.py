@@ -22,6 +22,7 @@ class Agent:
     domains: tuple = ()              # always allowed by the proxy
     prompt_style: str = ""           # how the system-prompt text is passed (see prompt_args)
     login_hint: str = ""             # how to log in, for messages
+    package_marker: str = ""         # file marking a release dir that holds the program's helpers
 
     def env_for(self, os_: str) -> dict:
         return {k: v for k, v, only in self.env if only in (None, os_)}
@@ -67,6 +68,10 @@ AGENTS: dict[str, Agent] = {
         domains=("openai.com", "chatgpt.com"),
         prompt_style="codex",
         login_hint="sign in outside the sandbox: CODEX_HOME=<codex_dir> codex login --device-auth",
+        # Codex installs as a release dir: bin/codex plus helpers (codex-path/rg,
+        # codex-resources/...). The whole release dir is mounted, never ~/.codex
+        # itself, which holds the user's personal login (auth.json).
+        package_marker="codex-package.json",
     ),
 }
 
@@ -104,7 +109,8 @@ EXEC_MAGIC = (
 class Program:
     """The agent's program, resolved on the host."""
     found: str | None = None         # what PATH lookup found (maybe a symlink)
-    real: str | None = None          # the real file, mounted read-only and run by path
+    real: str | None = None          # the real file, run by absolute path
+    mount: str | None = None         # what is mounted read-only: `real`, or its release dir
     problem: str = ""                # why it isn't a single self-contained executable
 
     @property
@@ -112,12 +118,19 @@ class Program:
         return self.real is not None and not self.problem
 
 
-def resolve_program(command: str, path_env: str | None) -> Program:
+def resolve_program(command: str, path_env: str | None, package_marker: str = "") -> Program:
     found = shutil.which(command, path=path_env)
     if not found:
         return Program(problem=f"`{command}` not found on PATH")
     real = os.path.realpath(found)
-    prog = Program(found=found, real=real)
+    prog = Program(found=found, real=real, mount=real)
+    if package_marker:
+        d = os.path.dirname(real)
+        for _ in range(2):                          # bin/<program> -> the release dir
+            if os.path.isfile(os.path.join(d, package_marker)):
+                prog.mount = d
+                break
+            d = os.path.dirname(d)
     try:
         with open(real, "rb") as f:
             head = f.read(4)

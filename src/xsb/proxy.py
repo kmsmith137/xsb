@@ -516,6 +516,14 @@ def ready(rt: Runtime, os_: str) -> bool:
         return False
 
 
+def running_port(ctx: Context) -> int | None:
+    """macOS: the running proxy's TCP port."""
+    try:
+        return int(open(Runtime(ctx.runtime_dir).portfile).read().strip())
+    except (OSError, ValueError):
+        return None
+
+
 def proxy_argv(ctx: Context) -> list[str]:
     return [sys.executable, "-m", "xsb.proxy", "--runtime-dir", ctx.runtime_dir,
             "--xsb-home", ctx.xsb_home]
