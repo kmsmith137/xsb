@@ -205,8 +205,9 @@ def make_query(qid=0x1234, name="example.com"):
 class FakeResolver:
     """UDP + TCP DNS server on one port; records queries; can truncate over UDP."""
 
-    def __init__(self, truncate=False):
+    def __init__(self, truncate=False, pad=0):
         self.truncate = truncate
+        self.pad = pad                    # extra answer bytes (to make big replies)
         self.udp_queries, self.tcp_queries = [], []
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp.bind(("127.0.0.1", 0))
@@ -231,7 +232,8 @@ class FakeResolver:
                 return
             self.udp_queries.append(q)
             self.udp.sendto(self.answer(q, tc=self.truncate) if self.truncate else
-                            q[:2] + struct.pack("!H", 0x8180) + q[4:] + b"UDP-ANSWER", addr)
+                            q[:2] + struct.pack("!H", 0x8180) + q[4:] + b"UDP-ANSWER"
+                            + b"x" * self.pad, addr)
 
     def tcp_loop(self):
         while True:
