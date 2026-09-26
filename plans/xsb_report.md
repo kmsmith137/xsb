@@ -19,7 +19,9 @@ The `xsb` package, as laid out in plan §12, committed one phase at a time:
 | `d250bb3` | 5: protected paths, I3/I4, end-to-end tests |
 | `1d671fc` | 6: `prompt.py`, `xsb prompt`, Codex profile |
 | `2188d94` | 7: `backends/seatbelt.py`, `seatbelt_base.sb`, `MACOS.md` |
-| `c217102`, `ab1c4f2`, later | README, fixes from review passes |
+| `c217102` | README, fixes from my own review pass |
+| `ab1c4f2` | `~/.config/git` credential store kept hidden |
+| `4f9addb` | fixes from an independent security review (below) |
 
 Modules beyond the plan's list, all small: `context.py` (everything
 machine-specific — home, hostname, OS, cwd, environment, `~/.xsb`, runtime
@@ -60,7 +62,7 @@ All checks passed, so §7 stood as designed:
 
 ### Tests
 
-`pytest tests` runs 152 unit tests and 24 integration tests. On `cf05`: all
+`pytest tests` runs 172 unit tests and 25 integration tests. On `cf05`: all
 pass except two opt-in integration tests, skipped (below).
 
 The unit tests cover the plan's whole unit-test list (§12). The integration
@@ -73,8 +75,9 @@ tests cover its whole integration list, with the adjustments noted below:
   (both network modes), supplementary groups attached;
 - protected paths: the default Claude files, and a protected main checkout
   whose worktree still commits while `.git/config`, `hooks/`, the worktree's
-  `.git` file and `commondir` stay read-only; symlinked `xsb.toml` and net
-  list read-only at their real paths; I3 refusal;
+  `.git` file and `commondir` stay read-only; renaming a parent directory of a
+  pin (or of a nested repo's `.git`) fails; symlinked `xsb.toml` and net list
+  read-only at their real paths; I3 refusal;
 - network: an allowed domain works (HTTPS and plain HTTP), an unlisted one gets
   the 403 with the `xsb net-allow` hint and shows in `xsb net-log`; in
   enforced mode no raw TCP, no UDP, no outside resolver, no `--noproxy`; DNS in
@@ -124,6 +127,29 @@ runtime dir, keeping the real `HOME` so podman keeps its config.
   failing relay wasn't simulated in a real container.
 - An interactive `xsb shell` / `xsb claude` session (with a TTY). Everything
   was exercised non-interactively; `-it` is added only when stdin is a TTY.
+
+### Independent security review
+
+After the phases were done, a separate agent reviewed the security-critical
+code cold (read-only). Its findings, and what was done (commit `4f9addb`):
+
+| Finding | Outcome |
+|---|---|
+| On Linux, a pin more than one level below a writable mount can be escaped by renaming a parent directory (the mount moves with it) and recreating the path, e.g. `mv .claude .x; mkdir .claude` then a new `settings.json`. **Confirmed in a container: the host got the agent's file.** | Fixed (approach approved by the user): every directory between a writable mount and a mount inside it is bind-mounted onto itself, so none can be renamed or removed. Tested with the rename attacks. |
+| A symlinked `xsb.toml` (the plan's B.2 layout) can be replaced: the link is in the writable root. | Documented as a known gap, **the user's choice** (over refusing symlinks, or recording link targets in `~/.xsb`). |
+| Git discovery followed `.git` files and symlinks the agent can write: a planted `sub/.git` could get another repo's store mounted read-write; discovery could also climb above the root. | Fixed: a store is used only if it is inside the root, its `.git` is above the root, or it registers this work tree as a linked worktree. |
+| Git files host git runs were still unpinned: submodules with `/` in their names or nested, submodule `.git` files, `config.worktree`, `core.hooksPath` in the work tree. | Fixed (all pinned). An in-progress rebase's todo list (`exec` lines) can't be pinned: documented. |
+| Glob characters in the root path (e.g. `proj[old]`) silently disabled protect pins, on both backends. | Fixed: literal parts are escaped before globbing. |
+| Host names with control characters reached `proxy.log`, `xsb net-log` and the 403 body. | Fixed: invalid names get a 400; log output is made printable. |
+| macOS open mode `(allow network*)` also allowed Unix sockets (e.g. the tmux server). | Fixed: open mode allows IP only. |
+| Smaller: bytes sent right after `CONNECT` were dropped; an in-root PATH entry could make xsb mount any host executable as the agent's program; env values visible in `ps`; `*` skipped hidden dirs on Linux but not in the Seatbelt regexes; other projects' `xsb.toml` under read-write mounts. | Fixed, except the last (documented). The env now goes in a private `--env-file` (podman) or the process environment (Seatbelt). |
+
+Found along the way, also fixed in `4f9addb`: podman copies its own
+`HTTP(S)_PROXY` into containers by default (now `--http-proxy=false`), and
+`xsb net-stop` could leave the proxy running when the kernel delivered SIGTERM
+to a worker thread (the proxy now blocks the signals and `sigwait()`s for
+them; `stop()` falls back to SIGKILL). I reproduced the second in a
+start/stop loop (1 in ~30), and verified the fix over 40 cycles.
 
 ## Departures from the plan
 
@@ -203,9 +229,20 @@ My own, each small:
 19. The plan's `net/` directory (the maintainer's lists, Appendix B.4) isn't
     created: copying ch_top's lists in is a §11 migration step, and they need
     their `sbox-net` wording updated then.
+20. From the security review (above): self-bind mounts above pins; git stores
+    accepted only when the agent couldn't have planted the pointer to them;
+    the extra git pins; escaped glob literals; `*` matching hidden names;
+    proxy host-name validation; `--http-proxy=false`; the environment kept
+    off command lines; macOS open mode without Unix sockets; agent programs
+    not resolved through in-root PATH entries that point outside the root.
 
 ## Open issues and suggestions
 
+- **Symlinked `xsb.toml`** (the plan's B.2 layout for ch_top): an agent can
+  replace the link with its own `xsb.toml`, which applies at the next launch.
+  Kept as a documented gap by the user's choice. If that changes: refuse
+  symlinked configs, or record each root's link target in `~/.xsb` and refuse
+  a launch when it changed.
 - **Symlinked protected files** (README "Known gaps"): if, say,
   `.claude/settings.json` is a symlink, xsb pins the target, but the link sits
   in a writable directory, so an agent can replace it with a file of its own.
