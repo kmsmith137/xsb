@@ -35,14 +35,14 @@ agent (or person) who completes it there.
     this launch re-allowed (I3); the same for the proxy's runtime dir and the
     per-launch `TMPDIR` (I5);
   - network: `enforced` denies `network*` and allows only `localhost` (the
-    proxy's TCP port, and the agent's own local servers); `open` allows
-    `network*`.
+    proxy's TCP port, and the agent's own local servers); `open` allows any IP
+    address (but not Unix-domain sockets).
 - Every path is resolved with `os.path.realpath` (`/tmp` → `/private/tmp`).
 - Launch: the profile is written to the runtime dir (`$TMPDIR/xsb`, or
-  `$XDG_RUNTIME_DIR/xsb`), then
-  `sandbox-exec -f <profile> /usr/bin/env -i K=V... <command>`, with a
-  per-launch `TMPDIR` (`<runtime>/tmp/<pid>`) that is removed, with the
-  profile, after the command exits. `XDG_CACHE_HOME` is `$TMPDIR/cache`.
+  `$XDG_RUNTIME_DIR/xsb`), then `/usr/bin/sandbox-exec -f <profile> <command>`
+  runs with exactly the Policy's environment, and a per-launch `TMPDIR`
+  (`<runtime>/tmp/<pid>`) that is removed, with the profile, after the command
+  exits. `XDG_CACHE_HOME` is `$TMPDIR/cache`.
 - The proxy listens on `127.0.0.1:<port>` (TCP; port 0 on first start, then
   reused, recorded in `<runtime>/proxy.port`). No relay and no DNS forwarder:
   DNS goes through mDNSResponder, allowed in the base profile.
@@ -58,10 +58,21 @@ agent (or person) who completes it there.
   whether the re-allowed metadata on `~/.xsb` and the runtime dir (after their
   denies) is enough for the agent dir and `TMPDIR` to resolve.
 - `(allow network-inbound (local ip "localhost:*"))`: needed for local servers
-  to accept connections? Unix-domain sockets inside allowed paths may need
-  `(allow network* (local unix-socket) (remote unix-socket))` or similar.
-- `/usr/bin/env -i` finds a relative command (e.g. `bash` for `xsb shell`)
-  through the `PATH` it was given.
+  to accept connections?
+- **Unix-domain sockets are denied in both modes** (open mode allows IP only),
+  so the sandbox can't reach e.g. the tmux server's socket, whose path is
+  forwarded in `$TMUX`. Tools that use Unix sockets inside allowed paths (a
+  test server under the root) may need `(allow network* (local unix-socket
+  (subpath ...)) (remote unix-socket (subpath ...)))` for the writable paths;
+  check what fails.
+- The environment is passed as `sandbox-exec`'s own process environment
+  (exactly the Policy's env, not on the command line); check that
+  `sandbox-exec` passes it through unchanged and finds a relative command
+  (e.g. `bash` for `xsb shell`) through that `PATH`.
+- Renaming a parent directory: on Linux, pins needed self-bind mounts so a
+  parent rename can't move them. Seatbelt rules are path-based, so a renamed
+  parent shouldn't help an agent there, but test it: `mv .claude .x; mkdir
+  .claude` and then write `.claude/settings.json` must fail.
 
 ## Checklist (plan §13)
 

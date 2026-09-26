@@ -118,13 +118,34 @@ class Program:
         return self.real is not None and not self.problem
 
 
-def resolve_program(command: str, path_env: str | None, package_marker: str = "") -> Program:
-    found = shutil.which(command, path=path_env)
+def _under(path: str, parent: str) -> bool:
+    return path == parent or path.startswith(parent.rstrip("/") + "/")
+
+
+def resolve_program(command: str, path_env: str | None, package_marker: str = "",
+                    writable: tuple = ()) -> Program:
+    """Find the agent's program on PATH and resolve its symlinks.
+
+    `writable`: directories the agent can write (the root). A PATH entry there
+    is only used if the program it leads to is there too: otherwise an agent
+    could plant a symlink that makes xsb mount any host executable.
+    """
+    wr = [os.path.realpath(w) for w in writable]
+    found = real = None
+    for entry in (path_env or os.defpath).split(os.pathsep):
+        cand = shutil.which(command, path=entry) if entry else None
+        if not cand:
+            continue
+        r = os.path.realpath(cand)
+        in_writable = any(_under(os.path.realpath(entry), w) for w in wr)
+        if in_writable and not any(_under(r, w) for w in wr):
+            continue
+        found, real = cand, r
+        break
     if not found:
         return Program(problem=f"`{command}` not found on PATH")
-    real = os.path.realpath(found)
     prog = Program(found=found, real=real, mount=real)
-    if package_marker:
+    if package_marker and not any(_under(real, w) for w in wr):
         d = os.path.dirname(real)
         for _ in range(2):                          # bin/<program> -> the release dir
             if os.path.isfile(os.path.join(d, package_marker)):

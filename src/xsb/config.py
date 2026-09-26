@@ -234,9 +234,14 @@ class Expander:
             v["ROOT"] = self.root
         return v
 
-    def expand(self, s: str, what: str) -> str:
+    def expand(self, s: str, what: str, escape=lambda v: v) -> str:
+        """Expand ~ and variables. `escape` is applied to every substituted
+        value (glob.escape, so a value like "proj[old]" stays literal)."""
+        orig = s
+        tail = ""
         if s == "~" or s.startswith("~/"):
-            s = self.ctx.home + s[1:]
+            tail = escape(self.ctx.home)
+            s = s[1:]
         elif s.startswith("~"):
             raise ConfigError(f"{what}: only ~ and ~/ are supported, not {toml_value(s)}")
         variables = self.variables()
@@ -246,29 +251,33 @@ class Expander:
                 return "$"                  # $$ is a literal $
             name = m.group(1) if m.group(1) is not None else m.group(2)
             if name is None or not ENV_NAME.fullmatch(name):
-                raise ConfigError(f"{what}: stray '$' in {toml_value(s)} (write $$ for a literal $)")
+                raise ConfigError(f"{what}: stray '$' in {toml_value(orig)} (write $$ for a literal $)")
             if name not in variables:
                 why = " (not in a project)" if name == "ROOT" else ""
-                raise ConfigError(f"{what}: ${name} is not defined{why}, in {toml_value(s)}")
-            return variables[name]
+                raise ConfigError(f"{what}: ${name} is not defined{why}, in {toml_value(orig)}")
+            return escape(variables[name])
 
-        return _VAR.sub(repl, s)
+        return tail + _VAR.sub(repl, s)
 
-    def path(self, s: str, what: str) -> str:
-        p = self.expand(s, what)
+    def path(self, s: str, what: str, escape=lambda v: v) -> str:
+        p = self.expand(s, what, escape)
         if not os.path.isabs(p):
             if self.root is None:
                 raise ConfigError(f"{what}: relative path {toml_value(s)} needs a project root")
-            p = os.path.join(self.root, p)
+            p = os.path.join(escape(self.root), p)
         return os.path.normpath(p)
+
+    def pattern(self, s: str, what: str) -> str:
+        """s as an absolute glob pattern: the root and substituted values are
+        escaped, so only the glob characters written in s itself are special."""
+        return self.path(s, what, escape=glob.escape)
 
     def glob(self, s: str, what: str) -> list[str]:
         """Existing paths matching s (after expansion). Missing ones, including
-        broken symlinks, are skipped."""
-        p = self.path(s, what)
-        if glob.has_magic(p):
-            return sorted(m for m in glob.glob(p) if os.path.exists(m))
-        return [p] if os.path.exists(p) else []
+        broken symlinks, are skipped. `*` matches hidden names too, as the
+        Seatbelt backend's regexes do."""
+        return sorted(m for m in glob.glob(self.pattern(s, what), include_hidden=True)
+                      if os.path.exists(m))
 
 
 # --------------------------------------------------------------------------

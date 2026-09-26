@@ -357,3 +357,127 @@ def test_git_credentials_never_visible(make_ctx, home):
     assert t.visible(str(home / ".gitconfig")) and t.visible(str(home / ".config/git/config"))
     assert not t.visible(str(home / ".config/git/credentials"))
     assert not t.visible(str(home / ".git-credentials"))
+
+
+# ---- review fixes: self-binds, trusted git stores, more git pins, escaping ----
+
+def test_self_binds_keep_pins_in_place(make_ctx, home):
+    root = project(home)
+    write(root / ".claude" / "settings.json", "{}")
+    write(root / "wt" / ".claude" / "settings.json", "{}")
+    p = policy(make_ctx(cwd=root))
+    mm = modes(p)
+    assert mm[str(root / ".claude" / "settings.json")] == "ro"
+    # Every directory between the root and a pin is a mount point of its own.
+    for d in (root / ".claude", root / "wt", root / "wt" / ".claude"):
+        assert mm[str(d)] == "rw", d
+    assert str(root / "other") not in mm
+
+
+@needs_git
+def test_self_binds_for_nested_repo_store(make_ctx, home):
+    root = project(home)
+    repo = root / "libs" / "x"
+    repo.mkdir(parents=True)
+    git("init", "-q", cwd=repo)
+    # Launch from libs/ so libs/x is an immediate subdirectory.
+    p = policy(make_ctx(cwd=root / "libs"))
+    mm = modes(p)
+    assert mm[str(repo / ".git")] == "rw" and mm[str(repo / ".git" / "config")] == "ro"
+    assert mm[str(root / "libs")] == "rw" and mm[str(repo)] == "rw"
+
+
+@needs_git
+def test_planted_git_file_pointing_outside_root_ignored(make_ctx, home):
+    other = home / "other-repo"
+    other.mkdir()
+    git("init", "-q", cwd=other)
+    root = project(home)
+    write(root / "sub" / ".git", f"gitdir: {other}/.git\n")
+    os.symlink(other, root / "link")               # a symlinked subdir, too
+    p = policy(make_ctx(cwd=root))
+    assert not p.table().visible(str(other / ".git"))
+    assert not p.table().visible(str(other / ".git" / "config"))
+
+
+@needs_git
+def test_store_above_root_and_linked_worktree_accepted(make_ctx, home):
+    # The root is inside a repo's work tree: its .git is above the root.
+    outer = home / "mono"
+    outer.mkdir()
+    git("init", "-q", "-b", "main", cwd=outer)
+    git("commit", "-q", "--allow-empty", "-m", "x", cwd=outer)
+    root = project(home, name="mono/sub")
+    p = policy(make_ctx(cwd=root))
+    assert modes(p)[str(outer / ".git")] == "rw"
+    # A root that is a linked worktree of a repo outside it.
+    git("worktree", "add", "-q", str(home / "wt-root"), "-b", "wt", cwd=outer)
+    root2 = project(home, name="wt-root")
+    p = policy(make_ctx(cwd=root2))
+    mm = modes(p)
+    assert mm[str(outer / ".git")] == "rw"
+    assert mm[str(root2 / ".git")] == "ro"          # its .git file is pinned
+
+
+@needs_git
+def test_submodule_and_worktree_config_pins(make_ctx, home, tmp_path):
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    git("init", "-q", "-b", "main", cwd=lib)
+    git("commit", "-q", "--allow-empty", "-m", "x", cwd=lib)
+    root = project(home)
+    top = root / "top"
+    top.mkdir()
+    git("init", "-q", "-b", "main", cwd=top)
+    git("-c", "protocol.file.allow=always", "submodule", "add", "-q", str(lib), "libs/foo", cwd=top)
+    git("config", "extensions.worktreeConfig", "true", cwd=top)
+    git("config", "core.hooksPath", ".husky/_", cwd=top)
+    (top / ".husky" / "_").mkdir(parents=True)
+    p = policy(make_ctx(cwd=top))
+    mm = modes(p)
+    g = top / ".git"
+    assert mm[str(g / "modules" / "libs" / "foo" / "config")] == "ro"      # '/' in the name
+    assert mm[str(g / "modules" / "libs" / "foo" / "hooks")] == "ro"
+    assert mm[str(top / "libs" / "foo" / ".git")] == "ro"                  # submodule gitfile
+    assert mm[str(g / "config.worktree")] == "ro"
+    assert str(g / "config.worktree") in p.create_files
+    assert mm[str(top / ".husky" / "_")] == "ro"                           # core.hooksPath
+
+
+def test_glob_characters_in_root_path(make_ctx, home):
+    root = project(home, name="proj[old]*")
+    write(root / ".claude" / "settings.json", "{}")
+    write(root / ".mcp.json", "{}")
+    p = policy(make_ctx(cwd=root))
+    mm = modes(p)
+    assert mm[str(root / ".claude" / "settings.json")] == "ro"
+    assert mm[str(root / ".mcp.json")] == "ro"
+    assert str(root) + "/*/.mcp.json" in [g.replace("[[]", "[").replace("[*]", "*")
+                                          for g in p.protect_globs]
+
+
+def test_star_matches_hidden_dirs(make_ctx, home):
+    root = project(home)
+    write(root / ".hidden" / ".claude" / "settings.json", "{}")
+    p = policy(make_ctx(cwd=root))
+    assert modes(p)[str(root / ".hidden" / ".claude" / "settings.json")] == "ro"
+
+
+def test_planted_agent_symlink_in_root_ignored(make_ctx, home):
+    root = project(home)
+    bindir, real = fake_agent(home, "claude")
+    secret = home / "private" / "tool"
+    write(secret, "")
+    secret.chmod(0o755)
+    venv = root / ".venv" / "bin"
+    venv.mkdir(parents=True)
+    os.symlink(secret, venv / "claude")          # planted by an agent
+    ctx = make_ctx(cwd=root, env={"PATH": f"{venv}:{bindir}:/usr/bin:/bin"})
+    p = policy(ctx, verb="claude")
+    assert p.command[0] == real                  # the planted one is skipped
+    assert not p.table().visible(str(secret))
+    # A program that really lives in the root is fine (it's visible anyway).
+    write(venv / "codex", "")
+    (venv / "codex").chmod(0o755)
+    p = policy(ctx, verb="codex", code_paths=[])
+    assert p.command[0] == str(venv / "codex")

@@ -42,11 +42,25 @@ def sample_policy(network="enforced", tty=True) -> Policy:
 
 def test_podman_argv_golden():
     spec = PodmanBackend().command(sample_policy())
-    text = format_argv(spec.argv, spec.image).replace(relay_path(), "<relay.py>") + "\n"
+    env_file = f"/run/user/1000/xsb/env-{os.getpid()}"
+    text = (format_argv(spec.argv, spec.image).replace(relay_path(), "<relay.py>")
+            .replace(env_file, "/run/user/1000/xsb/env-<pid>") + "\n")
     check_golden("podman_argv.txt", text)
-    assert spec.files == {"/run/user/1000/xsb/resolv.conf":
-                          "nameserver 127.0.0.1\nsearch example.org\n"}
+    assert spec.files["/run/user/1000/xsb/resolv.conf"] == \
+        "nameserver 127.0.0.1\nsearch example.org\n"
+    # The environment is in a private file (removed after the launch), not in the argv.
+    assert spec.files[env_file].splitlines() == [f"{k}={v}" for k, v in sample_policy().env.items()]
+    assert env_file in spec.cleanup
+    assert not any(a.startswith("HOME=") for a in spec.argv)
     assert spec.image == "docker.io/library/ubuntu:24.04"
+
+
+def test_env_value_with_newline_falls_back_to_e():
+    pol = sample_policy()
+    pol.env["MULTI"] = "a\nb"
+    spec = PodmanBackend().command(pol)
+    assert "MULTI=a\nb" in spec.argv
+    assert "MULTI" not in spec.files[f"/run/user/1000/xsb/env-{os.getpid()}"]
 
 
 def test_podman_argv_open_mode():
@@ -61,7 +75,7 @@ def test_podman_argv_open_mode():
 
 def test_podman_argv_structure():
     argv = PodmanBackend().command(sample_policy()).argv
-    assert argv[:4] == ["podman", "run", "--rm", "--init"]
+    assert argv[:5] == ["podman", "run", "--rm", "--init", "--http-proxy=false"]
     assert argv[argv.index("--network") + 1] == "none"
     for flag in ("--group-add", "-w", "--tmpfs"):
         assert flag in argv

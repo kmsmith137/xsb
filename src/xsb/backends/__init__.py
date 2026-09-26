@@ -22,6 +22,7 @@ class LaunchSpec:
     description: str = ""                        # extra text for --dry-run (e.g. a Seatbelt profile)
     cleanup: list = field(default_factory=list)  # paths removed after the launch
     image: str = ""                              # podman: the base image (pulled if missing)
+    env: dict | None = None                      # the launched process's environment (seatbelt)
 
 
 class Backend(Protocol):

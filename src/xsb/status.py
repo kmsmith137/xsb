@@ -86,7 +86,8 @@ def gather(ctx: Context, backend=None) -> tuple[list[str], Checks]:
     else:
         checks.add(False, f"{ctx.tilde(ctx.xsb_home)} does not exist", "fix: run `xsb init`")
     for a in agents.AGENTS.values():
-        prog = agents.resolve_program(a.command, ctx.environ.get("PATH"), a.package_marker)
+        prog = agents.resolve_program(a.command, ctx.environ.get("PATH"), a.package_marker,
+                                      writable=(cfg.root,) if cfg and cfg.root else ())
         if prog.real is None:
             checks.add(True, f"{a.name}: not installed")
         elif prog.problem:

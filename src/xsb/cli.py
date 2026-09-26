@@ -291,6 +291,8 @@ def cmd_launch(ctx: Context, verb: str, rest: list[str]) -> int:
         os.makedirs(d, exist_ok=True)
         if os.path.realpath(d) in agent_dirs:
             os.chmod(d, 0o700)
+    for f in policy.create_files:
+        open(f, "a").close()
     return backend.launch(spec)
 
 

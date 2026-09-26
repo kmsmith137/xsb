@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import ipaddress
 import os
 import re
 import select
@@ -155,6 +156,25 @@ def recv_exact(sock: socket.socket, n: int) -> bytes | None:
     return buf
 
 
+HOSTNAME = re.compile(r"[A-Za-z0-9_]([A-Za-z0-9_.-]*[A-Za-z0-9_.])?")
+
+
+def valid_host(host: str) -> bool:
+    """A DNS name or an IP address; anything else (control characters, spaces,
+    ...) is refused before it can reach the log or a terminal."""
+    if HOSTNAME.fullmatch(host) and len(host) <= 253:
+        return True
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def printable(text: str) -> str:
+    return "".join(c if c.isprintable() else "?" for c in text)
+
+
 def is_loopback(addr: str) -> bool:
     return addr.startswith("127.") or addr == "::1" or addr.startswith("::ffff:127.")
 
@@ -206,6 +226,10 @@ class Proxy:
 
     def open_upstream(self, client, host: str, port: int):
         """Apply the decision, then connect. On failure, answer the client and return None."""
+        if not valid_host(host):
+            self.log(f"BADHOST  {printable(repr(host))}")
+            self.send_status(client, "400 Bad Request", "xsb: not a valid host name\n")
+            return None
         d = self.decide(host)
         if d != "allow":
             self.send_block(client, host, d)
@@ -243,11 +267,14 @@ class Proxy:
                 host, _, p = target.rpartition(":")
                 host = (host or target).strip("[]")
                 port = int(p) if p.isdigit() else 443
-                recv_until(client, data, b"\r\n\r\n")        # discard the CONNECT headers
+                data = recv_until(client, data, b"\r\n\r\n")    # the CONNECT headers
+                early = data.partition(b"\r\n\r\n")[2]           # bytes sent right after them
                 up = self.open_upstream(client, host, port)
                 if up is None:
                     return
                 client.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                if early:
+                    up.sendall(early)
                 pipe(client, up)
             elif "://" in target:                           # plain-HTTP proxy request
                 u = urlsplit(target)
@@ -559,15 +586,16 @@ def stop(ctx: Context) -> int | None:
     pid = running_pid(rt)
     if pid is None:
         return None
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return None
-    for _ in range(100):
-        if not lock_held(rt):
-            break
-        time.sleep(0.03)
-    return pid
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            return pid
+        for _ in range(100):
+            if not lock_held(rt):
+                return pid
+            time.sleep(0.03)
+    raise ProxyError(f"could not stop the proxy (pid {pid})")
 
 
 def rotate_log(path: str):
@@ -690,7 +718,8 @@ def log_lines(ctx: Context) -> list[str] | None:
         try:
             with open(path) as f:
                 found = True
-                lines += [l.rstrip("\n") for l in f if " BLOCKED " in l or " DENIED " in l]
+                lines += [printable(l.rstrip("\n")) for l in f
+                          if " BLOCKED " in l or " DENIED " in l or " BADHOST " in l]
         except FileNotFoundError:
             pass
     return lines if found else None
@@ -710,6 +739,12 @@ def main(argv=None):
     rt = Runtime(args.runtime_dir or ctx.runtime_dir)
     home = args.xsb_home or ctx.xsb_home
     rt.make()
+    # Block SIGTERM/SIGINT in every thread (the worker threads inherit this) and
+    # collect them with sigwait below. With ordinary handlers, a signal the
+    # kernel delivered to a worker thread could go unnoticed while the main
+    # thread sleeps, and `xsb net-stop` would leave the proxy running.
+    stop_signals = {signal.SIGTERM, signal.SIGINT}
+    signal.pthread_sigmask(signal.SIG_BLOCK, stop_signals)
 
     lock = os.open(rt.lockfile, os.O_RDWR | os.O_CREAT, 0o600)
     try:
@@ -728,16 +763,8 @@ def main(argv=None):
     proxy.log(f"--- proxy up (pid {os.getpid()}, xsb {__version__}) on {where}; "
               f"lists in {home} ---")
 
-    stopping = threading.Event()
-
-    def on_signal(*_):
-        stopping.set()
-
-    signal.signal(signal.SIGTERM, on_signal)
-    signal.signal(signal.SIGINT, on_signal)
     proxy.start_threads()
-    while not stopping.wait(3600):
-        pass
+    signal.sigwait(stop_signals)
     proxy.log(f"--- proxy stopped (pid {os.getpid()}) ---")
     try:
         os.unlink(rt.pidfile)

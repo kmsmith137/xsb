@@ -347,3 +347,33 @@ def test_version_mismatch_reported(make_ctx, home, run):
         assert "xsb net-stop" in proxy.version_problem(ctx)
     finally:
         proxy.stop(ctx)
+
+
+def test_invalid_hostname_refused_and_escaped(server):
+    s = unix_connect(server.rt.proxy_sock)
+    s.sendall(b"CONNECT evil\x1b]52;c;aGk=\x07.com:443 HTTP/1.1\r\n\r\n")
+    reply = recv_all(s)
+    assert reply.startswith(b"HTTP/1.1 400") and b"\x1b" not in reply
+    log = open(server.rt.logfile).read()
+    assert "\x1b" not in log and "\x07" not in log and "BADHOST" in log
+
+
+@pytest.mark.parametrize("host,ok", [("example.com", True), ("a_b.example.com", True),
+                                     ("10.0.0.1", True), ("::1", True), ("fe80::1", True),
+                                     ("evil\x1b.com", False), ("a b", False), ("", False),
+                                     ("-x.com", False)])
+def test_valid_host(host, ok):
+    assert proxy.valid_host(host) == ok
+
+
+def test_connect_forwards_early_bytes(server):
+    server.allow_loopback = True
+    srv = echo_server()
+    port = srv.getsockname()[1]
+    s = unix_connect(server.rt.proxy_sock)
+    s.sendall(f"CONNECT localhost:{port} HTTP/1.1\r\n\r\n".encode() + b"early")
+    head = b""
+    while b"\r\n\r\n" not in head:
+        head += s.recv(1)
+    assert recv_all(s) == b"echo:early"
+    srv.close()

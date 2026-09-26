@@ -139,7 +139,11 @@ def profile(policy, realpath=os.path.realpath) -> str:
                   '(allow network-bind (local ip "localhost:*"))',
                   '(allow network-inbound (local ip "localhost:*"))']
     else:
-        lines.append("(allow network*)")
+        # IP only: Unix-domain sockets stay denied (e.g. the tmux server's, whose
+        # path is in $TMUX, would be an escape route).
+        lines += ['(allow network-outbound (remote ip "*:*"))',
+                  '(allow network-bind (local ip "*:*"))',
+                  '(allow network-inbound (local ip "*:*"))']
     return "\n".join(lines) + "\n"
 
 
@@ -187,10 +191,11 @@ class SeatbeltBackend:
     def command(self, policy) -> LaunchSpec:
         text = profile(policy)
         path = os.path.join(policy.runtime_dir, f"profile-{os.getpid()}.sb")
-        argv = ["sandbox-exec", "-f", path, "/usr/bin/env", "-i",
-                *[f"{k}={v}" for k, v in policy.env.items()], *policy.command]
+        # The environment is passed as the process's own (exactly policy.env),
+        # not on the command line, where other users could see it in `ps`.
+        argv = ["/usr/bin/sandbox-exec", "-f", path, *policy.command]
         cleanup = [path] + ([policy.tmpdir] if policy.tmpdir else [])
-        return LaunchSpec(argv=argv, files={path: text}, cleanup=cleanup,
+        return LaunchSpec(argv=argv, files={path: text}, cleanup=cleanup, env=dict(policy.env),
                           description=f"# Seatbelt profile ({path})\n{text}")
 
     def launch(self, spec: LaunchSpec) -> int:
@@ -201,7 +206,7 @@ class SeatbeltBackend:
             with open(path, "w") as f:
                 f.write(text)
         try:
-            return run_foreground(spec.argv)
+            return run_foreground(spec.argv, env=spec.env)
         finally:
             for p in spec.cleanup:
                 if os.path.isdir(p) and not os.path.islink(p):

@@ -225,9 +225,14 @@ cover the same path, the deeper one wins; for identical paths, the later one):
 4. git: the shared `.git` store of the repo containing the current directory,
    of each repo in its parents up to the root, and of each repo in its
    immediate subdirectories, read-write (so commits work from worktrees, even
-   when the main checkout is protected), with each store's `config`, `hooks/`,
-   `worktrees/*/commondir`, submodule `config` and `hooks/`, and every linked
-   worktree's `.git` file pinned read-only;
+   when the main checkout is protected). Since `.git` files inside the root are
+   writable, a store is used only if it is inside the root, or its `.git` is
+   above the root, or it registers this work tree as a linked worktree; a
+   planted `.git` file can't get another repo mounted. Pinned read-only in each
+   store: `config`, `hooks/` (created if missing), `worktrees/*/commondir`,
+   `config.worktree` (when `extensions.worktreeConfig` is on), submodules'
+   `config` and `hooks/`, every linked worktree's and submodule's `.git` file,
+   and a `core.hooksPath` directory;
 5. `[protect]` paths, read-only. The defaults are the files Claude Code loads by
    itself in the root and each immediate subdirectory: `.claude/settings.json`,
    `.claude/settings.local.json`, `.claude/hooks`, `.mcp.json`;
@@ -235,6 +240,12 @@ cover the same path, the deeper one wins; for identical paths, the later one):
 
 On Linux a bind mount can only pin a path that exists, so creating a *new*
 protected file isn't prevented; protect the whole directory if that matters.
+Every directory between a writable mount and a mount inside it (e.g.
+`<root>/.claude` above a pinned `settings.json`) is bind-mounted onto itself:
+a directory that merely contains a mount could be renamed, taking the pin with
+it, and then recreated. Those directories stay writable but can't be renamed
+or removed in the sandbox, and moving a file across one (e.g. from a worktree
+to its parent) falls back to copying; hard links across them fail.
 On macOS the protected globs are regexes and cover new files too.
 
 ### Environment
@@ -331,7 +342,17 @@ Known gaps, accepted:
   CDN-hosted domain can front for others.
 - **macOS**: every loopback port is reachable from the sandbox, including other
   local services; there is no private loopback.
+- **A symlinked `xsb.toml`** can be replaced: xsb pins the file it points to,
+  but the link itself sits in the writable root, so an agent can swap it for a
+  regular `xsb.toml` with a wider policy, which takes effect at the next
+  launch. A regular-file `xsb.toml` in the root can't be replaced. If you
+  symlink it (e.g. to track it in git), check it (`xsb status` shows the link)
+  before launching after an untrusted session.
 - **Creating new protected files** isn't prevented on Linux (see above).
+- **Git state the host acts on later**: an in-progress rebase's todo list
+  (`exec` lines run at `git rebase --continue`) lives in the writable store.
+- **Other projects' `xsb.toml` files** under a read-write mount (outside this
+  root) aren't pinned; don't mount other project roots read-write.
 - **Symlinked protected files**: the target is pinned, not the link itself, so
   an agent can replace the link with a file of its own. Don't symlink protected
   files, or protect the directory holding the link.

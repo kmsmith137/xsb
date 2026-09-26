@@ -55,18 +55,31 @@ class PodmanBackend:
     def command(self, policy) -> LaunchSpec:
         """The podman argv for a policy. Pure: reads and writes nothing."""
         enforced = policy.network == "enforced"
-        argv = ["podman", "run", "--rm", "--init",
+        # --http-proxy=false: podman would otherwise copy its own HTTP(S)_PROXY
+        # into the container, and the environment must start empty.
+        argv = ["podman", "run", "--rm", "--init", "--http-proxy=false",
                 "--network", "none" if enforced else "pasta",
                 "--tmpfs", "/tmp", "--tmpfs", "/run",
                 "-w", policy.cwd, "--group-add", "keep-groups"]
         if policy.tty:
             argv.append("-it")
         argv += policy.extra_args
+        # The environment goes in a private file, not on the command line, where
+        # other users could see it in `ps`. (A value with a newline can't be
+        # written there, so it falls back to -e.)
+        files, cleanup = {}, []
+        env_file = os.path.join(policy.runtime_dir, f"env-{os.getpid()}")
+        lines = []
         for k, v in policy.env.items():
-            argv += ["-e", f"{k}={v}"]
+            if "\n" in v:
+                argv += ["-e", f"{k}={v}"]
+            else:
+                lines.append(f"{k}={v}\n")
+        files[env_file] = "".join(lines)
+        cleanup.append(env_file)
+        argv += ["--env-file", env_file]
         for m in policy.mounts:
             argv += ["-v", f"{m.source}:{m.path}:{m.mode}"]
-        files = {}
         if enforced:
             resolv = os.path.join(policy.runtime_dir, "resolv.conf")
             files[resolv] = "".join(line + "\n" for line in
@@ -83,18 +96,27 @@ class PodmanBackend:
             argv += ["/bin/sh", "-c", f'{SANDBOX_PYTHON} -I {RELAY_IN_SANDBOX} && exec "$@"',
                      "xsb"]
         argv += policy.command
-        return LaunchSpec(argv=argv, files=files, image=policy.image)
+        return LaunchSpec(argv=argv, files=files, image=policy.image, cleanup=cleanup)
 
     def launch(self, spec: LaunchSpec) -> int:
         if not shutil.which("podman"):
             raise BackendError("podman not found; install it (see `xsb status`)")
         for path, text in spec.files.items():
+            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
             tmp = path + f".{os.getpid()}.tmp"
-            with open(tmp, "w") as f:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
                 f.write(text)
             os.replace(tmp, path)
-        ensure_image(spec.image)
-        return run_foreground(spec.argv)
+        try:
+            ensure_image(spec.image)
+            return run_foreground(spec.argv)
+        finally:
+            for p in spec.cleanup:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
 
 
 def podman_runtime() -> str:
@@ -116,8 +138,8 @@ def ensure_image(image: str):
                                "to an image matching this host's distro")
 
 
-def run_foreground(argv: list[str]) -> int:
-    proc = subprocess.Popen(argv)
+def run_foreground(argv: list[str], env: dict | None = None) -> int:
+    proc = subprocess.Popen(argv, env=env)
     while True:
         try:
             return proc.wait()

@@ -93,3 +93,28 @@ def test_i3_refused(sb):
         f.write(f'\n[[mount]]\npath = "{os.path.dirname(sb.xsb_home)}"\nmode = "ro"\n')
     r = sb.xsb("run", "--", "true")
     assert r.returncode == 1 and "(I3)" in r.stderr
+
+
+def test_parent_rename_cannot_move_pins(sb):
+    """A pin can't be escaped by renaming a directory above it and recreating
+    the path (every directory between a writable mount and a pin is a mount)."""
+    sb.write(".claude/settings.json", '{"orig": true}')
+    sb.write("wt/.claude/settings.local.json", '{"orig": true}')
+    repo = os.path.join(sb.root, "libs", "x")
+    os.makedirs(repo)
+    git("init", "-q", cwd=repo)
+    r = sb.run(f"""
+        cd {sb.root}
+        mv .claude .claude-moved 2>/dev/null && echo MOVED-CLAUDE || echo claude-stuck
+        mv wt wt-moved 2>/dev/null && echo MOVED-WT || echo wt-stuck
+        mv wt/.claude wt/.c2 2>/dev/null && echo MOVED-WT-CLAUDE || echo wt-claude-stuck
+        mv libs/x libs/y 2>/dev/null && echo MOVED-REPO || echo repo-stuck
+        echo new > wt/newfile && echo wt-writable
+        mv wt/newfile newfile-moved && echo cross-mount-move-ok
+    """, cwd=os.path.join(sb.root, "libs"))
+    assert r.returncode == 0, r.stderr
+    assert "MOVED" not in r.stdout, r.stdout
+    for word in ("claude-stuck", "wt-stuck", "wt-claude-stuck", "repo-stuck", "wt-writable",
+                 "cross-mount-move-ok"):
+        assert word in r.stdout, (word, r.stdout)
+    assert open(os.path.join(sb.root, ".claude", "settings.json")).read() == '{"orig": true}'

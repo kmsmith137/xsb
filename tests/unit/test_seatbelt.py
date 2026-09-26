@@ -76,7 +76,9 @@ def test_profile_structure():
 
 def test_open_network():
     text = profile(sample_policy(network="open"), realpath=fake_realpath)
-    assert "(allow network*)" in text and "(deny network*)" not in text
+    assert '(allow network-outbound (remote ip "*:*"))' in text
+    assert "(deny network*)" not in text
+    assert "(allow network*)" not in text          # Unix sockets stay denied
 
 
 def test_glob_regex():
@@ -95,14 +97,14 @@ def test_sbpl_escaping():
 
 def test_command_and_cleanup():
     spec = SeatbeltBackend().command(sample_policy())
-    assert spec.argv[:2] == ["sandbox-exec", "-f"]
+    assert spec.argv[:2] == ["/usr/bin/sandbox-exec", "-f"]
     prof = spec.argv[2]
     assert prof.startswith("/var/folders/x/T/xsb/profile-") and prof in spec.files
-    i = spec.argv.index("/usr/bin/env")
-    assert spec.argv[i + 1] == "-i"
-    assert "TMPDIR=/var/folders/x/T/xsb/tmp/42" in spec.argv
-    assert spec.argv[-2:] == ["/Users/u/.local/share/claude/versions/2.1",
-                              "--dangerously-skip-permissions"]
+    # The environment is the process's own, not on the command line.
+    assert spec.env["TMPDIR"] == "/var/folders/x/T/xsb/tmp/42"
+    assert not any(a.startswith("TMPDIR=") for a in spec.argv)
+    assert spec.argv[3:] == ["/Users/u/.local/share/claude/versions/2.1",
+                             "--dangerously-skip-permissions"]
     assert "/var/folders/x/T/xsb/tmp/42" in spec.cleanup and prof in spec.cleanup
     assert spec.description.startswith("# Seatbelt profile")
 

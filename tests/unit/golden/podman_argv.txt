@@ -1,6 +1,7 @@
 podman run \
     --rm \
     --init \
+    --http-proxy=false \
     --network none \
     --tmpfs /tmp \
     --tmpfs /run \
@@ -8,15 +9,7 @@ podman run \
     --group-add keep-groups \
     -it \
     --ipc host \
-    -e TERM=xterm-256color \
-    -e HOME=/home/u \
-    -e USER=u \
-    -e PATH=/usr/bin:/bin \
-    -e CLAUDE_CONFIG_DIR=/home/u/.xsb/claude \
-    -e IS_SANDBOX=1 \
-    -e HTTPS_PROXY=http://127.0.0.1:3128 \
-    -e XSB_ROOT=/home/u/proj \
-    -e 'SSH_CONNECTION=10.0.0.1 5000 10.0.0.2 22' \
+    --env-file /run/user/1000/xsb/env-<pid> \
     -v /usr:/usr:ro \
     -v /etc:/etc:ro \
     -v /home/u/proj:/home/u/proj:rw \
