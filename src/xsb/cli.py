@@ -267,6 +267,9 @@ def cmd_launch(ctx: Context, verb: str, rest: list[str]) -> int:
     req = LaunchRequest(verb=verb, args=args, network=network, tty=sys.stdin.isatty(),
                         proxy_port=port)
     policy = build_policy(cfg, req, backend.name)
+    if policy.agent:
+        from . import prompt
+        prompt.add_to_command(policy, prompt.generate(policy))
     spec = backend.command(policy)
     if dry:
         out("# Resolved policy")
@@ -285,6 +288,21 @@ def cmd_launch(ctx: Context, verb: str, rest: list[str]) -> int:
         if os.path.realpath(d) in agent_dirs:
             os.chmod(d, 0o700)
     return backend.launch(spec)
+
+
+# --------------------------------------------------------------------------
+# xsb prompt (plan §9)
+# --------------------------------------------------------------------------
+
+def cmd_prompt(ctx: Context, args) -> int:
+    from . import prompt
+    from .backends import backend_name
+    from .policy import LaunchRequest, build_policy
+    cfg = load_config(ctx)
+    policy = build_policy(cfg, LaunchRequest(verb=args.agent, need_program=False),
+                          backend_name(ctx.os), check_only=True)
+    sys.stdout.write(prompt.generate(policy))
+    return 0
 
 
 # --------------------------------------------------------------------------
@@ -342,6 +360,10 @@ def build_parsers() -> dict:
     ap = argparse.ArgumentParser(prog="xsb status", description="Project, proxy and health "
                                  "checks; exits non-zero if any check fails.")
     p["status"] = (ap, cmd_status)
+    ap = argparse.ArgumentParser(prog="xsb prompt", description="Print the system-prompt text "
+                                 "a launch here would add for the agent.")
+    ap.add_argument("agent", nargs="?", default="claude", choices=sorted(agents.AGENTS))
+    p["prompt"] = (ap, cmd_prompt)
     for verb, fn, which in (("net-allow", cmd_net_allow, "allow"), ("net-deny", cmd_net_deny, "deny")):
         ap = argparse.ArgumentParser(prog=f"xsb {verb}", description=f"Append domains to "
                                      f"~/.xsb/net-{which}.txt (through a symlink, if it is one).")

@@ -195,6 +195,7 @@ class LaunchRequest:
     network: str | None = None       # --network override
     tty: bool = False
     proxy_port: int | None = None    # macOS: the running proxy's TCP port
+    need_program: bool = True        # False for `xsb prompt`: a missing agent is fine
 
 
 def launched_agents(verb: str) -> list[agents.Agent]:
@@ -241,7 +242,7 @@ def build_policy(cfg: Config, req: LaunchRequest, backend: str,
     for a in launched:
         prog = resolve_program(a.command, ctx.environ.get("PATH"), a.package_marker)
         if prog.real is None:
-            if req.verb == a.name:
+            if req.verb == a.name and req.need_program:
                 raise PolicyError(f"`{a.command}` not found on PATH; install it first")
             continue
         programs[a.name] = prog
@@ -305,7 +306,8 @@ def build_policy(cfg: Config, req: LaunchRequest, backend: str,
     # Command.
     if req.verb in agents.AGENTS:
         a = agents.AGENTS[req.verb]
-        command = [programs[a.name].real, *a.no_prompt_flags, *req.args]
+        prog = programs.get(a.name)
+        command = [prog.real if prog else a.command, *a.no_prompt_flags, *req.args]
     elif req.verb == "shell":
         command = ["bash"]
     elif req.verb == "run":

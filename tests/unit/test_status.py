@@ -83,3 +83,26 @@ def test_status_reports_refused_launch(run, make_ctx, home):
     write(root / "xsb.toml", '[env]\nrequire = ["SOMETHING_UNSET"]\n')
     rc, out, _ = run(make_ctx(cwd=root), "status", backend=FakeBackend())
     assert rc == 1 and "a launch here would be refused" in out and "SOMETHING_UNSET" in out
+
+
+def fake_program(home, name, content):
+    d = home / "bin"
+    d.mkdir(exist_ok=True)
+    real = home / "store" / name
+    real.parent.mkdir(exist_ok=True)
+    real.write_bytes(content)
+    real.chmod(0o755)
+    (d / name).symlink_to(real)
+    return d
+
+
+def test_status_agent_program_checks(run, make_ctx, home):
+    root = setup(run, make_ctx, home)
+    d = fake_program(home, "claude", b"\x7fELF" + b"\0" * 60)
+    ctx = make_ctx(cwd=root, env={"PATH": f"{d}:/usr/bin:/bin"})
+    rc, out, _ = run(ctx, "status", backend=FakeBackend())
+    assert "✓ claude: program ~/store/claude" in out and "✓ codex: not installed" in out
+    # A script shim isn't a single self-contained executable.
+    fake_program(home, "codex", b"#!/usr/bin/env node\nrequire('x')\n")
+    rc, out, _ = run(ctx, "status", backend=FakeBackend())
+    assert rc == 1 and "⚠ codex:" in out and "is a script" in out

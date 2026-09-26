@@ -85,6 +85,17 @@ def gather(ctx: Context, backend=None) -> tuple[list[str], Checks]:
                        f"fix: chmod 700 {ctx.tilde(ctx.xsb_home)}")
     else:
         checks.add(False, f"{ctx.tilde(ctx.xsb_home)} does not exist", "fix: run `xsb init`")
+    for a in agents.AGENTS.values():
+        prog = agents.resolve_program(a.command, ctx.environ.get("PATH"), a.package_marker)
+        if prog.real is None:
+            checks.add(True, f"{a.name}: not installed")
+        elif prog.problem:
+            checks.add(False, f"{a.name}: {prog.problem}",
+                       "fix: add [[mount]] entries for what it needs (xsb mounts only "
+                       f"{ctx.tilde(prog.mount)})")
+        else:
+            what = "release dir" if prog.mount != prog.real else "program"
+            checks.add(True, f"{a.name}: {what} {ctx.tilde(prog.mount)}")
     for problem in proxy.list_problems(ctx):
         checks.add(False, problem)
     vp = proxy.version_problem(ctx)
