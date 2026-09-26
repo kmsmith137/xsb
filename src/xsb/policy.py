@@ -217,8 +217,9 @@ def xsb_code_paths() -> list[str]:
 
 
 def build_policy(cfg: Config, req: LaunchRequest, backend: str,
-                 code_paths: list[str] | None = None) -> Policy:
-    """Resolve the config into a Policy, enforcing the invariants (plan §6)."""
+                 code_paths: list[str] | None = None, check_only: bool = False) -> Policy:
+    """Resolve the config into a Policy, enforcing the invariants (plan §6).
+    `check_only` (for `xsb status`) skips the backend details (image, devices)."""
     ctx, exp = cfg.ctx, cfg.expander
     if cfg.root is None:
         raise PolicyError("not in a project (no xsb.toml here or above); run `xsb init`")
@@ -321,7 +322,7 @@ def build_policy(cfg: Config, req: LaunchRequest, backend: str,
                     agent_dirs=agent_dirs, programs=programs, protected=protected,
                     skipped=skipped, tmpdir=tmpdir,
                     proxy_port=env_port(env))
-    if ctx.os == "linux":
+    if ctx.os == "linux" and not check_only:
         for p in ("/usr", "/etc"):
             if not os.path.isdir(p):
                 raise PolicyError(f"{p} does not exist on this host; the Linux backend needs it")

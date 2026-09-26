@@ -111,3 +111,21 @@ def _config_checks(ctx: Context, cfg, backend, checks: Checks):
         checks.add(False, f.comment, f"fix: add to {ctx.tilde(ctx.user_config)}:\n" + f.toml(ctx).split("\n", 1)[1].rstrip())
     if not findings:
         checks.add(True, "PATH and conda are visible in the sandbox")
+    if cfg.root:
+        _launch_checks(ctx, cfg, backend, checks)
+
+
+def _launch_checks(ctx: Context, cfg, backend, checks: Checks):
+    """Would a launch here be refused? This builds the policy for `xsb shell`,
+    which checks every invariant, including I4 (xsb's own code not writable)."""
+    from .policy import LaunchRequest, PolicyError, build_policy
+    try:
+        build_policy(cfg, LaunchRequest(verb="shell"), backend.name, check_only=True)
+    except (PolicyError, ConfigError) as e:
+        if "(I4)" in str(e):
+            checks.add(False, "xsb's own code would be writable from this project's sandbox (I4)",
+                       f"{e}")
+        else:
+            checks.add(False, f"a launch here would be refused: {e}")
+        return
+    checks.add(True, "xsb's own code is not writable from this project's sandbox (I4)")

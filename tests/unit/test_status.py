@@ -64,3 +64,22 @@ def test_status_permissive_xsb_home(run, make_ctx, home):
     os.chmod(home / ".xsb", 0o755)
     rc, out, _ = run(make_ctx(cwd=root), "status", backend=FakeBackend())
     assert rc == 1 and "chmod 700" in out
+
+
+def test_status_i4_writable_code(run, make_ctx, home, monkeypatch):
+    root = setup(run, make_ctx, home)
+    rc, out, _ = run(make_ctx(cwd=root), "status", backend=FakeBackend())
+    assert rc == 0 and "✓ xsb's own code is not writable" in out
+    import xsb.policy
+    code = root / "clone" / "xsb"
+    code.mkdir(parents=True)
+    monkeypatch.setattr(xsb.policy, "xsb_code_paths", lambda: [str(code)])
+    rc, out, _ = run(make_ctx(cwd=root), "status", backend=FakeBackend())
+    assert rc == 1 and "⚠ xsb's own code would be writable" in out
+
+
+def test_status_reports_refused_launch(run, make_ctx, home):
+    root = setup(run, make_ctx, home)
+    write(root / "xsb.toml", '[env]\nrequire = ["SOMETHING_UNSET"]\n')
+    rc, out, _ = run(make_ctx(cwd=root), "status", backend=FakeBackend())
+    assert rc == 1 and "a launch here would be refused" in out and "SOMETHING_UNSET" in out
