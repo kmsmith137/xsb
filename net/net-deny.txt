@@ -1,0 +1,17 @@
+# Egress denylist: domains to BLOCK without ever re-prompting (a remembered
+# "deny"). The proxy blocks these silently -- they never show up as "needs
+# approval" again. Add one with:
+#
+#     sbox-net deny <domain>
+#
+# Same syntax as net-allow.txt (an entry covers the domain + its subdomains;
+# inline/full-line "#" comments and blank lines ignored). Deny wins over allow.
+#
+# What belongs here: user-generated-content platforms (issues, READMEs, gists,
+# wikis, package-index project pages) that a prompt-injection attacker could use,
+# AND that have no legitimate one-off use for the agent -- so you'd never want even
+# an ad-hoc approval. A UGC site that MIGHT occasionally be useful (e.g. github.com,
+# pypi.org) is better left off BOTH lists: blocked by default, but approvable
+# per-use via 'sbox-net allow'. Deny is for "guarantee I'm never even asked".
+#
+# Empty for now.

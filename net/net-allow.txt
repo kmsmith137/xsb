@@ -1,0 +1,76 @@
+# Egress allowlist: domains the sandboxed agent may connect to (HTTP/HTTPS).
+#
+# sbox-net's proxy allows a domain only if it -- or a parent domain -- is listed
+# here; anything else is blocked and logged as "needs approval". When the agent
+# reports a blocked domain, approve it on the host with:
+#
+#     sbox-net allow <domain>      # then the agent retries
+#
+# One domain per line; an entry matches that domain AND its subdomains (so
+# "anthropic.com" covers api.anthropic.com). "*.foo.com" also works. Inline and
+# full-line "#" comments and blank lines are ignored. Shared by every worktree in
+# the group -- edit and commit here in the toplevel top. Hard blocks (which
+# override allow) live in net-deny.txt.
+#
+# POLICY: the threat we care about is PROMPT INJECTION, so the test for listing a
+# domain is "is the text it serves authored by a trusted vendor?" -- i.e. it is
+# first-party documentation. We deliberately do NOT allow user-generated-content
+# platforms (code hosts, package-index project pages, Q&A, wikis, blogs): anyone
+# can plant instructions there. Absent ON PURPOSE -- but only blocked-by-default,
+# NOT hard-denied, since each has a plausible one-off use; the agent can't reach
+# them on its own, but you can approve transiently with 'sbox-net allow' if a real
+# need comes up (deny vs. off-the-allowlist are equally injection-safe -- only you
+# can unblock either):
+#   - github.com / githubusercontent.com / github.io (UGC: issues/READMEs/gists/
+#     Pages; and the agent already has all the local git state it needs).
+#   - pypi.org / pythonhosted.org / anaconda.{org,com}: we run pip/conda BY HAND
+#     (unsandboxed), so the agent does not normally need them, and their project
+#     pages are uploader-controlled prose (an injection vector).
+#
+# THIS IS A STARTER LIST. The approval flow fills in the long tail.
+
+# === Claude infrastructure (REQUIRED -- the agent IS claude) =================
+# Not browsable UGC: the agent reaches its own API / login / telemetry here.
+anthropic.com
+claude.com            # OAuth /login token exchange (platform.claude.com)
+claude.ai             # updates, downloads.claude.ai
+datadoghq.com         # Claude Code telemetry (http-intake.logs.*.datadoghq.com)
+
+# === Vendor documentation (first-party; safe to read) ========================
+# -- CUDA / GPU --
+nvidia.com            # docs.nvidia.com, developer.nvidia.com
+cupy.dev
+# -- Python language + packaging docs (python.org/PyPA -- NOT the pypi index) --
+python.org            # docs.python.org, packaging.python.org, peps.python.org
+# -- scientific Python --
+numpy.org
+scipy.org
+astropy.org
+# -- C / C++ toolchain --
+cmake.org
+gnu.org               # gcc.gnu.org, make, ...
+llvm.org              # clang.llvm.org
+# -- libraries we build / link against --
+grpc.io
+protobuf.dev
+sqlalchemy.org        # docs.sqlalchemy.org, alembic.sqlalchemy.org
+openssl.org
+yaml.org
+blosc.org
+lz4.org
+zlib.net
+bzip.org
+# -- docs tooling --
+sphinx-doc.org
+# -- radio astronomy --
+atnf.csiro.au         # CSIRO ATNF (pulsar / FRB)
+stsci.edu
+
+# === Project docs on ReadTheDocs (SPECIFIC subdomains only) ==================
+# The apex readthedocs.io is a UGC platform -- never list it. Only the project
+# subdomains we actually use (each is controlled by that project's maintainers).
+pybind11.readthedocs.io
+asdf-standard.readthedocs.io
+pipmake.readthedocs.io
+
+# (add more as 'sbox-net allow ...' surfaces them)
